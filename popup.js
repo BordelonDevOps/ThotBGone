@@ -1,201 +1,80 @@
-// Popup script for Thot-B-Gone
+"use strict";
 
-// DOM elements for settings
-const enabledToggle = document.getElementById('enabled');
-const blockAdultContentToggle = document.getElementById('blockAdultContent');
-const blockOnlyFansFanslyToggle = document.getElementById('blockOnlyFansFansly');
-const showWarningsToggle = document.getElementById('showWarnings');
-const resetStatsButton = document.getElementById('resetStats');
-
-// DOM elements for total stats
-const totalBlocked = document.getElementById('total-blocked');
-const totalAdult = document.getElementById('total-adult');
-const totalOnlyfans = document.getElementById('total-onlyfans');
-const totalTweets = document.getElementById('total-tweets');
-const totalProfiles = document.getElementById('total-profiles');
-const totalLinks = document.getElementById('total-links');
-const totalScanned = document.getElementById('total-scanned');
-const totalLastReset = document.getElementById('total-last-reset');
-
-// DOM elements for session stats
-const sessionBlocked = document.getElementById('session-blocked');
-const sessionAdult = document.getElementById('session-adult');
-const sessionOnlyfans = document.getElementById('session-onlyfans');
-const sessionTweets = document.getElementById('session-tweets');
-const sessionProfiles = document.getElementById('session-profiles');
-const sessionLinks = document.getElementById('session-links');
-const sessionScanned = document.getElementById('session-scanned');
-
-// Session statistics (reset when browser closes)
-const sessionStats = {
-  totalBlocked: 0,
-  adultContentBlocked: 0,
-  onlyFansFanslyBlocked: 0,
-  tweetsBlocked: 0,
-  profilesBlocked: 0,
-  linksBlocked: 0,
-  tweetsScanned: 0
+const DEFAULTS = {
+  enabled: true,
+  blockPlatformLinks: true,
+  blockExplicitTerms: true,
+  showWarnings: true,
+  sensitivity: "balanced",
+  allowlist: [],
+  blocklist: []
 };
 
-// Load settings from storage
-function loadSettings() {
-  chrome.storage.sync.get(['enabled', 'blockAdultContent', 'blockOnlyFansFansly', 'showWarnings'], (result) => {
-    enabledToggle.checked = result.enabled !== false;
-    blockAdultContentToggle.checked = result.blockAdultContent !== false;
-    blockOnlyFansFanslyToggle.checked = result.blockOnlyFansFansly !== false;
-    showWarningsToggle.checked = result.showWarnings !== false;
-  });
+const ids = ["enabled", "blockPlatformLinks", "blockExplicitTerms", "showWarnings"];
+const elements = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
+const status = document.getElementById("status");
+const allowlist = document.getElementById("allowlist");
+const blocklist = document.getElementById("blocklist");
+
+function parseHandles(value) {
+  return [...new Set(value.split(/[\n,]/).map(item => item.trim().replace(/^@/, "")).filter(Boolean))];
 }
 
-// Load statistics from storage
-function loadStats() {
-  chrome.storage.sync.get('stats', (result) => {
-    const stats = result.stats || {
-      totalBlocked: 0,
-      adultContentBlocked: 0,
-      onlyFansFanslyBlocked: 0,
-      tweetsBlocked: 0,
-      profilesBlocked: 0,
-      linksBlocked: 0,
-      tweetsScanned: 0,
-      lastReset: new Date().toISOString()
-    };
-    
-    // Update total stats display
-    totalBlocked.textContent = stats.totalBlocked;
-    totalAdult.textContent = stats.adultContentBlocked;
-    totalOnlyfans.textContent = stats.onlyFansFanslyBlocked;
-    totalTweets.textContent = stats.tweetsBlocked;
-    totalProfiles.textContent = stats.profilesBlocked;
-    totalLinks.textContent = stats.linksBlocked;
-    totalScanned.textContent = stats.tweetsScanned;
-    
-    // Format last reset date
-    const lastReset = new Date(stats.lastReset);
-    const options = { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    };
-    totalLastReset.textContent = `Last reset: ${lastReset.toLocaleDateString(undefined, options)}`;
-    
-    // Calculate session stats (difference between total and session start)
-    const newBlocked = stats.totalBlocked - sessionStats.totalBlocked;
-    if (newBlocked > 0) {
-      sessionStats.totalBlocked += newBlocked;
-    }
-    
-    const newAdult = stats.adultContentBlocked - sessionStats.adultContentBlocked;
-    if (newAdult > 0) {
-      sessionStats.adultContentBlocked += newAdult;
-    }
-    
-    const newOnlyfans = stats.onlyFansFanslyBlocked - sessionStats.onlyFansFanslyBlocked;
-    if (newOnlyfans > 0) {
-      sessionStats.onlyFansFanslyBlocked += newOnlyfans;
-    }
-    
-    const newTweets = stats.tweetsBlocked - sessionStats.tweetsBlocked;
-    if (newTweets > 0) {
-      sessionStats.tweetsBlocked += newTweets;
-    }
-    
-    const newProfiles = stats.profilesBlocked - sessionStats.profilesBlocked;
-    if (newProfiles > 0) {
-      sessionStats.profilesBlocked += newProfiles;
-    }
-    
-    const newLinks = stats.linksBlocked - sessionStats.linksBlocked;
-    if (newLinks > 0) {
-      sessionStats.linksBlocked += newLinks;
-    }
-    
-    const newScanned = stats.tweetsScanned - sessionStats.tweetsScanned;
-    if (newScanned > 0) {
-      sessionStats.tweetsScanned += newScanned;
-    }
-    
-    // Update session stats display
-    sessionBlocked.textContent = sessionStats.totalBlocked;
-    sessionAdult.textContent = sessionStats.adultContentBlocked;
-    sessionOnlyfans.textContent = sessionStats.onlyFansFanslyBlocked;
-    sessionTweets.textContent = sessionStats.tweetsBlocked;
-    sessionProfiles.textContent = sessionStats.profilesBlocked;
-    sessionLinks.textContent = sessionStats.linksBlocked;
-    sessionScanned.textContent = sessionStats.tweetsScanned;
-  });
+function updateStatus(enabled, message) {
+  status.textContent = message || (enabled ? "Filtering is active on X" : "Filtering is paused");
+  status.classList.toggle("off", !enabled);
 }
 
-// Save settings to storage
-function saveSettings() {
-  const settings = {
-    enabled: enabledToggle.checked,
-    blockAdultContent: blockAdultContentToggle.checked,
-    blockOnlyFansFansly: blockOnlyFansFanslyToggle.checked,
-    showWarnings: showWarningsToggle.checked
-  };
-  
-  chrome.storage.sync.set(settings, () => {
-    // Notify content script of settings change
-    chrome.runtime.sendMessage({
-      action: 'updateSettings',
-      settings: settings
-    });
-  });
+async function loadSettings() {
+  const settings = await chrome.storage.sync.get(DEFAULTS);
+  ids.forEach(id => { elements[id].checked = settings[id]; });
+  document.querySelector(`input[name="sensitivity"][value="${settings.sensitivity}"]`).checked = true;
+  allowlist.value = settings.allowlist.join("\n");
+  blocklist.value = settings.blocklist.join("\n");
+  updateStatus(settings.enabled);
 }
 
-// Reset statistics
-function resetStats() {
-  chrome.runtime.sendMessage({ action: 'resetStats' }, (response) => {
-    if (response && response.success) {
-      // Reset session stats
-      Object.keys(sessionStats).forEach(key => {
-        sessionStats[key] = 0;
-      });
-      
-      // Reload stats display
-      loadStats();
-    }
-  });
+async function saveSetting(key, value) {
+  await chrome.storage.sync.set({ [key]: value });
+  const enabled = key === "enabled" ? value : elements.enabled.checked;
+  updateStatus(enabled, "Saved. Open X pages update automatically.");
 }
 
-// Tab switching functionality
-function setupTabs() {
-  const tabs = document.querySelectorAll('.stats-tab');
-  const contents = document.querySelectorAll('.stats-content');
-  
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      // Remove active class from all tabs and contents
-      tabs.forEach(t => t.classList.remove('active'));
-      contents.forEach(c => c.classList.remove('active'));
-      
-      // Add active class to clicked tab and corresponding content
-      tab.classList.add('active');
-      const tabName = tab.getAttribute('data-tab');
-      document.getElementById(`${tabName}-stats`).classList.add('active');
-    });
+async function loadStats() {
+  const { stats = {} } = await chrome.storage.local.get("stats");
+  ["totalBlocked", "platformLinks", "explicitPhrases", "promotionalPhrases"].forEach(id => {
+    document.getElementById(id).textContent = Number(stats[id] || 0).toLocaleString();
   });
+  document.getElementById("lastReset").textContent = stats.lastReset
+    ? `Reset ${new Date(stats.lastReset).toLocaleString()}`
+    : "Statistics begin after installation";
 }
 
-// Initialize popup
-document.addEventListener('DOMContentLoaded', () => {
-  // Load settings and stats
-  loadSettings();
-  loadStats();
-  
-  // Set up tabs
-  setupTabs();
-  
-  // Set up auto-refresh for stats
-  setInterval(loadStats, 2000);
+ids.forEach(id => {
+  elements[id].addEventListener("change", () => saveSetting(id, elements[id].checked));
 });
 
-// Event listeners for settings changes
-enabledToggle.addEventListener('change', saveSettings);
-blockAdultContentToggle.addEventListener('change', saveSettings);
-blockOnlyFansFanslyToggle.addEventListener('change', saveSettings);
-showWarningsToggle.addEventListener('change', saveSettings);
-resetStatsButton.addEventListener('click', resetStats);
+document.querySelectorAll('input[name="sensitivity"]').forEach(input => {
+  input.addEventListener("change", () => saveSetting("sensitivity", input.value));
+});
+
+document.getElementById("saveLists").addEventListener("click", async () => {
+  const next = {
+    allowlist: parseHandles(allowlist.value),
+    blocklist: parseHandles(blocklist.value)
+  };
+  await chrome.storage.sync.set(next);
+  allowlist.value = next.allowlist.join("\n");
+  blocklist.value = next.blocklist.join("\n");
+  updateStatus(elements.enabled.checked, "Account lists saved.");
+});
+
+document.getElementById("resetStats").addEventListener("click", async () => {
+  const response = await chrome.runtime.sendMessage({ action: "resetStats" });
+  if (response?.success) await loadStats();
+});
+
+Promise.all([loadSettings(), loadStats()]).catch(error => {
+  console.error(error);
+  updateStatus(false, "Unable to load extension settings.");
+});

@@ -1,126 +1,82 @@
-// Background script for Thot-B-Gone
-// Handles settings management and statistics tracking
+"use strict";
 
-// Initialize extension settings and statistics on installation
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.sync.set({
-    enabled: true,
-    blockAdultContent: true,
-    blockOnlyFansFansly: true,
-    showWarnings: true,
-    stats: {
-      totalBlocked: 0,
-      adultContentBlocked: 0,
-      onlyFansFanslyBlocked: 0,
-      tweetsBlocked: 0,
-      profilesBlocked: 0,
-      linksBlocked: 0,
-      tweetsScanned: 0,
-      lastReset: new Date().toISOString()
+const DEFAULT_SETTINGS = {
+  enabled: true,
+  blockPlatformLinks: true,
+  blockExplicitTerms: true,
+  showWarnings: true,
+  sensitivity: "balanced",
+  allowlist: [],
+  blocklist: []
+};
+
+const EMPTY_STATS = {
+  totalBlocked: 0,
+  platformLinks: 0,
+  explicitPhrases: 0,
+  promotionalPhrases: 0,
+  blockedAccounts: 0,
+  lastReset: null
+};
+
+let statsQueue = Promise.resolve();
+
+function setIcon(enabled) {
+  const suffix = enabled ? "" : "_disabled";
+  return chrome.action.setIcon({
+    path: {
+      16: `icon16${suffix}.png`,
+      48: `icon48${suffix}.png`,
+      128: `icon128${suffix}.png`
     }
-  }, () => {
-    console.log('Thot-B-Gone initialized with default settings');
-    updateIcon(true);
   });
-});
-
-// Listen for messages from content script or popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Handle getting settings and stats
-  if (message.action === 'getSettings') {
-    chrome.storage.sync.get(['enabled', 'blockAdultContent', 'blockOnlyFansFansly', 'showWarnings', 'stats'], (result) => {
-      sendResponse(result);
-    });
-    return true; // Required for async sendResponse
-  } 
-  // Handle updating settings
-  else if (message.action === 'updateSettings') {
-    chrome.storage.sync.set(message.settings, () => {
-      if (message.settings.hasOwnProperty('enabled')) {
-        updateIcon(message.settings.enabled);
-      }
-      sendResponse({ success: true });
-    });
-    return true; // Required for async sendResponse
-  } 
-  // Handle updating stats when content is blocked
-  else if (message.action === 'updateStats') {
-    chrome.storage.sync.get('stats', (result) => {
-      const stats = result.stats || {
-        totalBlocked: 0,
-        adultContentBlocked: 0,
-        onlyFansFanslyBlocked: 0,
-        tweetsBlocked: 0,
-        profilesBlocked: 0,
-        linksBlocked: 0,
-        tweetsScanned: 0,
-        lastReset: new Date().toISOString()
-      };
-      
-      // Update statistics based on what was blocked
-      stats.totalBlocked++;
-      
-      if (message.contentType === 'adult') {
-        stats.adultContentBlocked++;
-      } else if (message.contentType === 'onlyfans') {
-        stats.onlyFansFanslyBlocked++;
-      }
-      
-      if (message.elementType === 'tweet') {
-        stats.tweetsBlocked++;
-      } else if (message.elementType === 'profile') {
-        stats.profilesBlocked++;
-      } else if (message.elementType === 'link') {
-        stats.linksBlocked++;
-      }
-
-      if (message.tweetsScanned) {
-        stats.tweetsScanned += message.tweetsScanned;
-      }
-      
-      // Save updated statistics
-      chrome.storage.sync.set({ stats: stats }, () => {
-        sendResponse({ success: true, stats: stats });
-      });
-    });
-    return true; // Required for async sendResponse
-  } 
-  // Handle resetting stats
-  else if (message.action === 'resetStats') {
-    const resetStats = {
-      totalBlocked: 0,
-      adultContentBlocked: 0,
-      onlyFansFanslyBlocked: 0,
-      tweetsBlocked: 0,
-      profilesBlocked: 0,
-      linksBlocked: 0,
-      tweetsScanned: 0,
-      lastReset: new Date().toISOString()
-    };
-    
-    chrome.storage.sync.set({ stats: resetStats }, () => {
-      sendResponse({ success: true, stats: resetStats });
-    });
-    return true; // Required for async sendResponse
-  }
-});
-
-// Update extension icon based on enabled state
-function updateIcon(enabled) {
-  const iconPath = enabled ? {
-    16: "images/icon16.png",
-    48: "images/icon48.png",
-    128: "images/icon128.png"
-  } : {
-    16: "images/icon16_disabled.png",
-    48: "images/icon48_disabled.png",
-    128: "images/icon128_disabled.png"
-  };
-  
-  chrome.action.setIcon({ path: iconPath });
 }
 
-// Initialize icon on startup
-chrome.storage.sync.get('enabled', (result) => {
-  updateIcon(result.enabled !== false);
+async function initialize() {
+  const current = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  await chrome.storage.sync.set(current);
+  const local = await chrome.storage.local.get("stats");
+  if (!local.stats) {
+    await chrome.storage.local.set({ stats: { ...EMPTY_STATS, lastReset: new Date().toISOString() } });
+  }
+  await setIcon(current.enabled);
+}
+
+chrome.runtime.onInstalled.addListener(initialize);
+chrome.runtime.onStartup.addListener(initialize);
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.enabled) setIcon(changes.enabled.newValue).catch(() => {});
 });
+
+function recordEvent(reason) {
+  statsQueue = statsQueue.then(async () => {
+    const result = await chrome.storage.local.get("stats");
+    const stats = { ...EMPTY_STATS, ...result.stats };
+    stats.totalBlocked += 1;
+    if (reason === "adult-platform link") stats.platformLinks += 1;
+    if (reason === "explicit phrase") stats.explicitPhrases += 1;
+    if (reason === "promotional phrase") stats.promotionalPhrases += 1;
+    if (reason === "blocked account") stats.blockedAccounts += 1;
+    await chrome.storage.local.set({ stats });
+  });
+  return statsQueue;
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.action === "recordEvent") {
+    recordEvent(message.reason).then(() => sendResponse({ success: true }));
+    return true;
+  }
+
+  if (message.action === "resetStats") {
+    chrome.storage.local.set({
+      stats: { ...EMPTY_STATS, lastReset: new Date().toISOString() }
+    }).then(() => sendResponse({ success: true }));
+    return true;
+  }
+
+  return false;
+});
+
+initialize().catch(error => console.error("Thot-B-Gone initialization failed", error));

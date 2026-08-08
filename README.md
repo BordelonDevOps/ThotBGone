@@ -1,67 +1,47 @@
+# Thot-B-Gone
 
-# 🛡️ Thot-B-Gone
+Thot-B-Gone is a privacy-focused Chrome extension that filters selected adult promotions from X timelines. Version 2 replaces the original broad keyword scanner with a smaller, testable rules engine and clear user controls.
 
-**Thot-B-Gone** is a Chrome extension that scans your Twitter/X timeline and hides or flags adult content, including posts promoting OnlyFans, Fansly, and other NSFW platforms.
+## What it does
 
-## 🔧 Features
+- Detects links to configured adult-content platforms.
+- Detects high-confidence explicit phrases.
+- Offers Balanced and Strict sensitivity modes.
+- Supports per-account allow and block lists.
+- Collapses matching posts with a one-time reveal button, or hides them completely.
+- Stores preferences with `chrome.storage.sync` and aggregate counters with `chrome.storage.local`.
+- Runs entirely in the browser on X and Twitter pages. It sends no browsing data to a server.
 
-- ✅ Block adult content keywords like "nudes", "subscribe", and "explicit"
-- ✅ Auto-detect and filter URLs to platforms like OnlyFans and Fansly
-- ✅ Optional warning overlay instead of outright hiding tweets
-- ✅ Real-time scan counter for session activity
-- ✅ Simple toggleable settings via extension popup
+The extension does not use image recognition, machine learning, or remote moderation services. Text and link rules can produce false positives or miss content, so the user remains in control.
 
-## 📦 Installation
+## Install locally
 
-1. Clone or download this repository.
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable **Developer Mode** (top-right).
-4. Click **Load unpacked** and select the `thotbgone` folder.
-5. You're good to go.
+1. Download or clone this repository.
+2. Open `chrome://extensions/` in Chrome.
+3. Enable **Developer mode**.
+4. Select **Load unpacked** and choose this repository folder.
+5. Open X and use the toolbar popup to configure filtering.
 
-## ⚙️ Settings
+After updating the source, select **Reload** on the extension card in `chrome://extensions/` and refresh any open X tabs.
 
-Access the extension popup to toggle:
+## Development
 
-- 🔘 Enable/disable extension  
-- 🔘 Block adult keywords  
-- 🔘 Block OnlyFans/Fansly links  
-- 🔘 Show warning instead of hiding tweet
+Run the filtering-engine tests with:
 
-Your settings are saved using `chrome.storage.sync`.
-
-## 📂 Project Structure
-
-```
-thotbgone/
-├── icons/               # Extension icons
-├── content.js           # Scans tweets and hides content
-├── popup.html           # Popup UI
-├── popup.js             # Settings logic
-├── manifest.json        # Chrome extension manifest
+```powershell
+node tests/filtering-core.test.js
 ```
 
-## 🧠 How It Works
+The extension uses Manifest V3 and has no build step or third-party runtime dependencies.
 
-The content script scans visible tweets in real-time for:
+## Privacy and limitations
 
-- Adult-related **keywords**
-- Known **URL patterns** to adult platforms
+- Settings and aggregate counts remain in Chrome storage.
+- No post text, account information, or browsing history is transmitted.
+- X can change its page structure, which may require selector updates.
+- Shortened links may not expose their destination until X resolves them.
+- Filtering is rules-based and is not a substitute for X's safety controls.
 
-If matched, the tweet is hidden or replaced with a warning (based on user config).
+## License
 
-## ⚠️ Known Limitations
-
-- May miss embedded or dynamically-loaded media
-- Detection depends on keyword pattern matching
-- Optimized for standard Twitter UI layout
-
-## 📬 Contact
-
-Created by **Christopher Bordelon**  
-📧 bordelondevops2025@gmail.com  
-🔗 [GitHub @BordelonDevOps](https://github.com/BordelonDevOps)
-
-## 📄 License
-
-Licensed under the **MIT License**.
+MIT
